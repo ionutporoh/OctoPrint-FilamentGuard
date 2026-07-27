@@ -1,0 +1,25 @@
+<div>
+    <p>
+        <strong data-bind="text: stateText, css: stateClass"></strong>
+    </p>
+    <table class="table table-condensed" style="margin-bottom: 4px;">
+        <tbody>
+        <tr>
+            <td>{{ _('Pulses') }}</td>
+            <td data-bind="text: pulses"></td>
+        </tr>
+        <tr>
+            <td>{{ _('Rate') }}</td>
+            <td><span data-bind="text: rate"></span> /s</td>
+        </tr>
+        <tr>
+            <td>{{ _('Commanded') }}</td>
+            <td><span data-bind="text: commandedMm"></span> mm</td>
+        </tr>
+        <tr data-bind="visible: lastRatio() !== null">
+            <td>{{ _('Flow ratio') }}</td>
+            <td><span data-bind="text: ratioText"></span></td>
+        </tr>
+        </tbody>
+    </table>
+</div>
