@@ -37,6 +37,8 @@ class FilamentGuardPlugin(
         self._pulse_rate = 0.0
         self._debug_timer = None
         self._debug_until = 0.0
+        self._arm_seq = 0
+        self._confirm_pending = False
 
     # -- settings
 
@@ -48,7 +50,8 @@ class FilamentGuardPlugin(
             debounce_ms=2,
             mode="timeout",
             mm_per_pulse=0.0,
-            timeout_mm=7.0,
+            timeout_mm=15.0,
+            confirm_seconds=3.0,
             window_mm=20.0,
             ratio_threshold=0.7,
             consecutive_windows=2,
@@ -81,15 +84,17 @@ class FilamentGuardPlugin(
 
     def _apply_settings(self):
         s = self._settings
-        self._detector = JamDetector(
-            mode=s.get(["mode"]),
-            mm_per_pulse=s.get_float(["mm_per_pulse"]),
-            timeout_mm=s.get_float(["timeout_mm"]),
-            window_mm=s.get_float(["window_mm"]),
-            ratio_threshold=s.get_float(["ratio_threshold"]),
-            consecutive_windows=s.get_int(["consecutive_windows"]),
-            grace_mm=s.get_float(["grace_mm"]),
-        )
+        with self._lock:
+            was_armed = self._detector.armed
+            self._detector = JamDetector(
+                mode=s.get(["mode"]),
+                mm_per_pulse=s.get_float(["mm_per_pulse"]),
+                timeout_mm=s.get_float(["timeout_mm"]),
+                window_mm=s.get_float(["window_mm"]),
+                ratio_threshold=s.get_float(["ratio_threshold"]),
+                consecutive_windows=s.get_int(["consecutive_windows"]),
+                grace_mm=s.get_float(["grace_mm"]),
+            )
         self._stop_sensor()
         pin = s.get_int(["gpio_pin"])
         if pin is None or pin < 0:
@@ -109,6 +114,8 @@ class FilamentGuardPlugin(
         except Exception:
             self._logger.exception("Failed to start pulse sensor on GPIO%d", pin)
             self._sensor = None
+        if was_armed and self._sensor:
+            self._arm(reason="settings changed mid-print")
 
     def _stop_sensor(self):
         if self._sensor:
@@ -120,13 +127,24 @@ class FilamentGuardPlugin(
 
     # -- events / arming
 
+    def _arm(self, reason):
+        with self._lock:
+            self._arm_seq += 1
+            self._confirm_pending = False
+            self._detector.arm(self._sensor.count)
+        self._logger.info("FilamentGuard armed (%s)", reason)
+
     def on_event(self, event, payload):
         if event in (Events.PRINT_STARTED, Events.PRINT_RESUMED):
             if self._sensor:
-                with self._lock:
-                    self._tracker = ExtrusionTracker()
-                    self._detector.arm(self._sensor.count)
-                self._logger.info("FilamentGuard armed (%s)", event)
+                if event == Events.PRINT_STARTED:
+                    # fresh job: reset E tracking (start G-code will G92 E0).
+                    # On resume the tracker MUST survive — the job continues
+                    # with absolute E values, and a reset would count the first
+                    # move's whole E coordinate as one giant extrusion.
+                    with self._lock:
+                        self._tracker = ExtrusionTracker()
+                self._arm(reason=event)
             else:
                 self._logger.warning(
                     "Print started but no sensor configured — FilamentGuard inactive"
@@ -146,6 +164,7 @@ class FilamentGuardPlugin(
                       *args, **kwargs):
         if not gcode or not self._sensor:
             return
+        confirm_args = None
         with self._lock:
             if not self._detector.armed:
                 # keep E-mode/position tracking warm even when disarmed
@@ -155,12 +174,49 @@ class FilamentGuardPlugin(
             if delta <= 0:
                 return
             trigger = self._detector.on_extrusion(delta, self._sensor.count)
-            if trigger:
+            if trigger == TRIGGER_NO_MOTION:
+                # sent commands run ahead of physical execution, so re-check
+                # the pulse count after a delay instead of firing immediately
+                if self._confirm_pending:
+                    return
+                self._confirm_pending = True
+                confirm_args = (self._sensor.count, self._arm_seq)
+            elif trigger:
                 self._detector.disarm()
-        if trigger:
+        if confirm_args:
+            threading.Thread(
+                target=self._confirm_no_motion, args=confirm_args, daemon=True
+            ).start()
+        elif trigger:
             threading.Thread(
                 target=self._handle_trigger, args=(trigger,), daemon=True
             ).start()
+
+    def _confirm_no_motion(self, count_snapshot, arm_seq):
+        delay = self._settings.get_float(["confirm_seconds"])
+        if delay > 0:
+            time.sleep(delay)
+        fire = False
+        try:
+            sensor = self._sensor
+            if not sensor:
+                return
+            with self._lock:
+                if not self._detector.armed or self._arm_seq != arm_seq:
+                    return
+                if sensor.count != count_snapshot:
+                    self._logger.info(
+                        "No-motion threshold crossed but pulses arrived within "
+                        "%.1fs confirmation window — suppressed (printer "
+                        "lagging behind sent commands)", delay,
+                    )
+                    return
+                self._detector.disarm()
+                fire = True
+        finally:
+            self._confirm_pending = False
+        if fire:
+            self._handle_trigger(TRIGGER_NO_MOTION)
 
     def _handle_trigger(self, trigger):
         reason = (

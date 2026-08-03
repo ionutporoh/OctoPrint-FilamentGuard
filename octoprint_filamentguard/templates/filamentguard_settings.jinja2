@@ -50,7 +50,14 @@
         <label class="control-label">{{ _('Trigger after (mm without pulse)') }}</label>
         <div class="controls">
             <input type="number" min="1" step="0.5" class="input-mini" data-bind="value: settings.timeout_mm">
-            <span class="help-inline">{{ _('commanded extrusion with zero sensor pulses') }}</span>
+            <span class="help-inline">{{ _('commanded extrusion with zero sensor pulses (floored at 4× mm-per-pulse once calibrated)') }}</span>
+        </div>
+    </div>
+    <div class="control-group">
+        <label class="control-label">{{ _('Confirmation delay (s)') }}</label>
+        <div class="controls">
+            <input type="number" min="0" max="30" step="0.5" class="input-mini" data-bind="value: settings.confirm_seconds">
+            <span class="help-inline">{{ _('re-check the sensor before alerting; absorbs firmware buffer lag') }}</span>
         </div>
     </div>
     <div class="control-group" data-bind="visible: settings.mode() == 'distance'">

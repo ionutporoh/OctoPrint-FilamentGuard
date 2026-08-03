@@ -80,7 +80,11 @@ class JamDetector:
     (requires ``mm_per_pulse`` from calibration).
     """
 
-    def __init__(self, mode=MODE_TIMEOUT, mm_per_pulse=0.0, timeout_mm=7.0,
+    # a single late pulse must never trip the timeout, so the effective
+    # timeout is floored at this many pulse-distances once calibrated
+    TIMEOUT_MIN_PULSES = 4.0
+
+    def __init__(self, mode=MODE_TIMEOUT, mm_per_pulse=0.0, timeout_mm=15.0,
                  window_mm=20.0, ratio_threshold=0.7, consecutive_windows=2,
                  grace_mm=10.0):
         self.mode = mode
@@ -118,6 +122,12 @@ class JamDetector:
         self.armed = False
         self.in_grace = False
 
+    @property
+    def effective_timeout_mm(self):
+        if self.mm_per_pulse > 0:
+            return max(self.timeout_mm, self.TIMEOUT_MIN_PULSES * self.mm_per_pulse)
+        return self.timeout_mm
+
     def on_extrusion(self, delta_mm, pulse_count):
         """Returns TRIGGER_NO_MOTION / TRIGGER_UNDER_EXTRUSION or None."""
         if not self.armed or delta_mm <= 0:
@@ -144,7 +154,7 @@ class JamDetector:
             self._mm_since_pulse = 0.0
         else:
             self._mm_since_pulse += delta_mm
-        if self._mm_since_pulse >= self.timeout_mm:
+        if self._mm_since_pulse >= self.effective_timeout_mm:
             return TRIGGER_NO_MOTION
 
         if self.mode == MODE_DISTANCE and self.mm_per_pulse > 0:

@@ -121,6 +121,24 @@ class TestJamDetectorTimeout:
         r, _ = feed(d, 60, lambda mm: 0)
         assert r is None
 
+    def test_timeout_floored_at_four_pulse_distances(self):
+        # coarse sensor: 2.857mm/pulse, configured timeout tighter than 4 pulses
+        d = self.make(timeout_mm=7.0, mm_per_pulse=2.857, grace_mm=0.0)
+        assert abs(d.effective_timeout_mm - 4 * 2.857) < 1e-9
+        r, _ = feed(d, 11, lambda mm: 0)
+        assert r is None  # 7mm alone must not trigger
+        r, _ = feed(d, 2, lambda mm: 0)
+        assert r == TRIGGER_NO_MOTION  # past 11.4mm it must
+
+    def test_sparse_pulses_at_pulse_distance_never_trigger(self):
+        d = self.make(timeout_mm=7.0, mm_per_pulse=2.857, grace_mm=0.0)
+        r, _ = feed(d, 200, lambda mm: int(mm / 2.857))
+        assert r is None
+
+    def test_explicit_timeout_above_floor_wins(self):
+        d = self.make(timeout_mm=20.0, mm_per_pulse=2.857, grace_mm=0.0)
+        assert d.effective_timeout_mm == 20.0
+
     def test_rearm_resets_state(self):
         d = self.make()
         feed(d, 16, lambda mm: 0)  # near trigger
