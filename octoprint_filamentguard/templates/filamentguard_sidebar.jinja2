@@ -4,6 +4,13 @@
     </p>
     <table class="table table-condensed" style="margin-bottom: 4px;">
         <tbody>
+        <tr data-bind="visible: pin() !== null">
+            <td>{{ _('Pin') }}</td>
+            <td>
+                GPIO<span data-bind="text: pin"></span>
+                <span class="label" data-bind="text: levelText, css: levelClass"></span>
+            </td>
+        </tr>
         <tr>
             <td>{{ _('Pulses') }}</td>
             <td data-bind="text: pulses"></td>
@@ -11,6 +18,10 @@
         <tr>
             <td>{{ _('Rate') }}</td>
             <td><span data-bind="text: rate"></span> /s</td>
+        </tr>
+        <tr data-bind="visible: positionMm() !== null">
+            <td>{{ _('Position') }}</td>
+            <td><span data-bind="text: positionMm"></span> mm</td>
         </tr>
         <tr>
             <td>{{ _('Commanded') }}</td>
@@ -22,4 +33,17 @@
         </tr>
         </tbody>
     </table>
+    <div>
+        <button class="btn btn-mini" data-bind="click: toggleDebug, css: {active: debugEnabled}, visible: sensorPresent">
+            <i class="fa fa-heartbeat"></i>
+            <span data-bind="text: debugEnabled() ? '{{ _('Stop pin monitor') }}' : '{{ _('Pin monitor') }}'"></span>
+        </button>
+        <div data-bind="visible: debugEnabled" style="margin-top: 4px;">
+            <canvas id="filamentguard_wave" width="240" height="48"
+                    style="width: 100%; border: 1px solid #ccc; border-radius: 3px; background: #fff;"></canvas>
+            <small class="muted">
+                {{ _('Line level at 5 Hz, red ticks = pulses. Auto-off after 10 min.') }}
+            </small>
+        </div>
+    </div>
 </div>

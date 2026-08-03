@@ -35,6 +35,8 @@ class FilamentGuardPlugin(
         self._last_count = 0
         self._last_rate_ts = time.monotonic()
         self._pulse_rate = 0.0
+        self._debug_timer = None
+        self._debug_until = 0.0
 
     # -- settings
 
@@ -74,6 +76,7 @@ class FilamentGuardPlugin(
     def on_shutdown(self):
         if self._status_timer:
             self._status_timer.cancel()
+        self._stop_debug()
         self._stop_sensor()
 
     def _apply_settings(self):
@@ -203,6 +206,8 @@ class FilamentGuardPlugin(
                 sensor=self._sensor is not None,
                 armed=self._detector.armed,
                 in_grace=self._detector.in_grace,
+                pin=self._sensor.pin if self._sensor else None,
+                level=self._sensor.level if self._sensor else None,
                 pulses=count,
                 rate=round(self._pulse_rate, 1),
                 commanded_mm=round(self._detector.commanded_total, 1),
@@ -212,10 +217,56 @@ class FilamentGuardPlugin(
             ),
         )
 
-    # -- simple api (calibration)
+    # -- pin debug stream
+
+    DEBUG_INTERVAL = 0.2
+    DEBUG_AUTO_OFF = 600  # seconds
+
+    def _start_debug(self):
+        self._debug_until = time.monotonic() + self.DEBUG_AUTO_OFF
+        if self._debug_timer is None:
+            self._debug_timer = RepeatedTimer(
+                self.DEBUG_INTERVAL,
+                self._push_debug,
+                condition=self._debug_active,
+                on_condition_false=self._on_debug_stopped,
+                run_first=True,
+            )
+            self._debug_timer.start()
+        self._push_debug_state(True)
+
+    def _stop_debug(self):
+        self._debug_until = 0.0
+        if self._debug_timer:
+            self._debug_timer.cancel()
+            self._debug_timer = None
+            self._push_debug_state(False)
+
+    def _debug_active(self):
+        return self._sensor is not None and time.monotonic() < self._debug_until
+
+    def _on_debug_stopped(self):
+        self._debug_timer = None
+        self._push_debug_state(False)
+
+    def _push_debug_state(self, enabled):
+        self._plugin_manager.send_plugin_message(
+            self._identifier, dict(type="debug_state", enabled=enabled)
+        )
+
+    def _push_debug(self):
+        sensor = self._sensor
+        if not sensor:
+            return
+        self._plugin_manager.send_plugin_message(
+            self._identifier,
+            dict(type="debug", level=sensor.level, pulses=sensor.count),
+        )
+
+    # -- simple api
 
     def get_api_commands(self):
-        return dict(calibrate=[])
+        return dict(calibrate=[], debug=["enabled"])
 
     def on_api_command(self, command, data):
         import flask
@@ -226,6 +277,18 @@ class FilamentGuardPlugin(
             error = self._start_calibration()
             if error:
                 return flask.jsonify(dict(ok=False, error=error))
+            return flask.jsonify(dict(ok=True))
+        if command == "debug":
+            if not octoprint.access.permissions.Permissions.STATUS.can():
+                return flask.abort(403)
+            if data.get("enabled"):
+                if not self._sensor:
+                    return flask.jsonify(
+                        dict(ok=False, error="No sensor configured")
+                    )
+                self._start_debug()
+            else:
+                self._stop_debug()
             return flask.jsonify(dict(ok=True))
 
     def _start_calibration(self):

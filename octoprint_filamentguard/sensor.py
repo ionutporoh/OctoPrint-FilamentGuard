@@ -10,7 +10,7 @@ import time
 from datetime import timedelta
 
 import gpiod
-from gpiod.line import Bias, Edge
+from gpiod.line import Bias, Edge, Value
 
 EDGE_MAP = {"rising": Edge.RISING, "falling": Edge.FALLING, "both": Edge.BOTH}
 BIAS_MAP = {"pull_up": Bias.PULL_UP, "pull_down": Bias.PULL_DOWN, "none": Bias.AS_IS}
@@ -36,6 +36,17 @@ class PulseSensor:
     @property
     def count(self):
         return self._count
+
+    @property
+    def level(self):
+        """Current line level (1/0), or None if unavailable."""
+        request = self._request
+        if not request:
+            return None
+        try:
+            return 1 if request.get_value(self.pin) == Value.ACTIVE else 0
+        except OSError:
+            return None
 
     def start(self):
         settings = gpiod.LineSettings(
