@@ -7,7 +7,7 @@ software debounce fallback is applied in the reader thread.
 
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import gpiod
 from gpiod.line import Bias, Edge, Value
@@ -17,6 +17,10 @@ BIAS_MAP = {"pull_up": Bias.PULL_UP, "pull_down": Bias.PULL_DOWN, "none": Bias.A
 
 
 class PulseSensor:
+    @staticmethod
+    def _stamp():
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     def __init__(self, pin, edge="rising", bias="pull_up", debounce_ms=2,
                  chip_path="/dev/gpiochip0", logger=None):
         self.pin = int(pin)
@@ -69,7 +73,8 @@ class PulseSensor:
                 self._sw_debounce = True
                 if self._logger:
                     self._logger.info(
-                        "Kernel debounce unavailable on GPIO%d, using software debounce",
+                        "[%s] Kernel debounce unavailable on GPIO%d, using software debounce",
+                        self._stamp(),
                         self.pin,
                     )
             else:
@@ -81,8 +86,12 @@ class PulseSensor:
         self._thread.start()
         if self._logger:
             self._logger.info(
-                "Pulse sensor started on GPIO%d (edge=%s bias=%s debounce=%dms)",
-                self.pin, self.edge, self.bias, self.debounce_ms,
+                "[%s] Pulse sensor started on GPIO%d (edge=%s bias=%s debounce=%dms)",
+                self._stamp(),
+                self.pin,
+                self.edge,
+                self.bias,
+                self.debounce_ms,
             )
 
     def stop(self):
@@ -103,7 +112,9 @@ class PulseSensor:
                 events = self._request.read_edge_events()
             except OSError:
                 if self._running and self._logger:
-                    self._logger.exception("GPIO read failed, sensor thread exiting")
+                    self._logger.exception(
+                        "[%s] GPIO read failed, sensor thread exiting", self._stamp()
+                    )
                 return
             if self._sw_debounce and debounce_ns:
                 accepted = 0

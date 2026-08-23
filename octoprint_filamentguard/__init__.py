@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 import threading
 import time
+from datetime import datetime
 
 import octoprint.plugin
 from octoprint.events import Events
@@ -39,6 +40,9 @@ class FilamentGuardPlugin(
         self._debug_until = 0.0
         self._arm_seq = 0
         self._confirm_pending = False
+
+    def _stamp(self):
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # -- settings
 
@@ -98,7 +102,7 @@ class FilamentGuardPlugin(
         self._stop_sensor()
         pin = s.get_int(["gpio_pin"])
         if pin is None or pin < 0:
-            self._logger.info("No GPIO pin configured, sensor disabled")
+            self._logger.info("[%s] No GPIO pin configured, sensor disabled", self._stamp())
             return
         from .sensor import PulseSensor
 
@@ -112,7 +116,9 @@ class FilamentGuardPlugin(
             )
             self._sensor.start()
         except Exception:
-            self._logger.exception("Failed to start pulse sensor on GPIO%d", pin)
+            self._logger.exception(
+                "[%s] Failed to start pulse sensor on GPIO%d", self._stamp(), pin
+            )
             self._sensor = None
         if was_armed and self._sensor:
             self._arm(reason="settings changed mid-print")
@@ -122,7 +128,7 @@ class FilamentGuardPlugin(
             try:
                 self._sensor.stop()
             except Exception:
-                self._logger.exception("Failed to stop sensor")
+                self._logger.exception("[%s] Failed to stop sensor", self._stamp())
             self._sensor = None
 
     # -- events / arming
@@ -132,7 +138,7 @@ class FilamentGuardPlugin(
             self._arm_seq += 1
             self._confirm_pending = False
             self._detector.arm(self._sensor.count)
-        self._logger.info("FilamentGuard armed (%s)", reason)
+        self._logger.info("[%s] FilamentGuard armed (%s)", self._stamp(), reason)
 
     def on_event(self, event, payload):
         if event in (Events.PRINT_STARTED, Events.PRINT_RESUMED):
@@ -147,7 +153,8 @@ class FilamentGuardPlugin(
                 self._arm(reason=event)
             else:
                 self._logger.warning(
-                    "Print started but no sensor configured — FilamentGuard inactive"
+                    "[%s] Print started but no sensor configured — FilamentGuard inactive",
+                    self._stamp(),
                 )
         elif event in (
             Events.PRINT_PAUSED,
@@ -206,9 +213,11 @@ class FilamentGuardPlugin(
                     return
                 if sensor.count != count_snapshot:
                     self._logger.info(
-                        "No-motion threshold crossed but pulses arrived within "
+                        "[%s] No-motion threshold crossed but pulses arrived within "
                         "%.1fs confirmation window — suppressed (printer "
-                        "lagging behind sent commands)", delay,
+                        "lagging behind sent commands)",
+                        self._stamp(),
+                        delay,
                     )
                     return
                 self._detector.disarm()
@@ -224,8 +233,9 @@ class FilamentGuardPlugin(
             if trigger == TRIGGER_NO_MOTION
             else "under-extrusion detected (partial clog?)"
         )
-        self._logger.warning("FilamentGuard triggered: %s", reason)
-        payload = dict(trigger=trigger, reason=reason)
+        stamped_reason = "[%s] %s" % (self._stamp(), reason)
+        self._logger.warning("[%s] FilamentGuard triggered: %s", self._stamp(), reason)
+        payload = dict(trigger=trigger, reason=stamped_reason)
         self._event_bus.fire(Events.PLUGIN_FILAMENTGUARD_JAM, payload)
 
         s = self._settings
@@ -369,7 +379,10 @@ class FilamentGuardPlugin(
             feed = self._settings.get_int(["calibration_feedrate"])
             start = self._sensor.count
             self._logger.info(
-                "Calibration: extruding %.0fmm at F%d", length, feed
+                "[%s] Calibration: extruding %.0fmm at F%d",
+                self._stamp(),
+                length,
+                feed,
             )
             self._plugin_manager.send_plugin_message(
                 self._identifier,
@@ -380,7 +393,9 @@ class FilamentGuardPlugin(
             pulses = self._sensor.count - start
             if pulses < 10:
                 self._logger.warning(
-                    "Calibration failed: only %d pulses counted", pulses
+                    "[%s] Calibration failed: only %d pulses counted",
+                    self._stamp(),
+                    pulses,
                 )
                 self._plugin_manager.send_plugin_message(
                     self._identifier,
@@ -392,8 +407,11 @@ class FilamentGuardPlugin(
             self._settings.save()
             self._detector.mm_per_pulse = mm_per_pulse
             self._logger.info(
-                "Calibration done: %d pulses over %.0fmm -> %.4f mm/pulse",
-                pulses, length, mm_per_pulse,
+                "[%s] Calibration done: %d pulses over %.0fmm -> %.4f mm/pulse",
+                self._stamp(),
+                pulses,
+                length,
+                mm_per_pulse,
             )
             self._event_bus.fire(
                 Events.PLUGIN_FILAMENTGUARD_CALIBRATION_DONE,

@@ -2,6 +2,10 @@ $(function () {
     function FilamentGuardViewModel(parameters) {
         var self = this;
 
+        self._stamp = function () {
+            return new Date().toLocaleString();
+        };
+
         self.settingsViewModel = parameters[0];
         self.settings = undefined; // filled in onBeforeBinding
 
@@ -151,7 +155,7 @@ $(function () {
                 }
             } else if (data.type === "jam") {
                 new PNotify({
-                    title: gettext("Filament Guard"),
+                    title: gettext("Filament Guard") + " [" + self._stamp() + "]",
                     text: data.reason,
                     type: "error",
                     hide: false
