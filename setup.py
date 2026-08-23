@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="OctoPrint-FilamentGuard",
-    version="0.1.1",
+    version="0.1.2",
     description=(
         "Filament jam/runout detection using a hall-effect pulse sensor, "
         "with no-motion and under-extrusion (partial clog) detection modes."
